@@ -1,0 +1,31 @@
+[project]
+name = "realtor-reputation"
+description = "Realtor reputation tracking system"
+authors = ["Your Name"]
+telemetry = false
+requirements = []
+
+[contracts.realtor-registry]
+path = "contracts/realtor-registry.clar"
+depends_on = []
+
+[contracts.transaction-registry]
+path = "contracts/transaction-registry.clar"
+depends_on = ["realtor-registry"]
+
+[contracts.review-registry]
+path = "contracts/review-registry.clar"
+depends_on = ["realtor-registry", "transaction-registry"]
+
+[contracts.realtor-reputation]
+path = "contracts/realtor-reputation.clar"
+depends_on = ["realtor-registry", "transaction-registry", "review-registry"]
+
+[repl.analysis]
+passes = ["check_checker"]
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
