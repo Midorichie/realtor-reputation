@@ -1,135 +1,104 @@
 ;; realtor-registry.clar
-;; This contract handles realtor registration and profile management
-;; Author: Claude
+;; This contract manages realtor information and registration
  
-;; Error codes
-(define-constant ERR_UNAUTHORIZED (err u100))
-(define-constant ERR_ALREADY_REGISTERED (err u101))
-(define-constant ERR_NOT_REGISTERED (err u102))
-(define-constant ERR_INVALID_LICENSE (err u103))
-
-;; Define contract owner constant
+;; Define a constant for contract owner
 (define-constant contract-owner tx-sender)
+;; Error codes
+(define-constant ERR_UNAUTHORIZED (err u400))
+(define-constant ERR_ALREADY_REGISTERED (err u401))
+(define-constant ERR_NOT_FOUND (err u404))
+(define-constant ERR_INVALID_INPUT (err u405))
  
-;; Data maps
- 
-;; Realtor profile data structure
+;; Data maps to store realtor information
 (define-map realtors
-  { principal: principal }
+  { realtor: principal }
   {
     name: (string-utf8 100),
     license-number: (string-utf8 50),
     brokerage: (string-utf8 100),
     status: (string-utf8 20),
-    registration-block: uint,
-    profile-uri: (optional (string-utf8 256))
+    profile-uri: (optional (string-utf8 256)),
+    registration-block: uint
   }
 )
  
-;; Principal to license number mapping for quick lookup
-(define-map license-registry
-  { license-number: (string-utf8 50) }
-  { principal: principal }
-)
- 
-;; Functions
- 
-;; Register a new realtor
-(define-public (register-realtor
-                (name (string-utf8 100))
-                (license-number (string-utf8 50))
-                (brokerage (string-utf8 100))
-                (profile-uri (optional (string-utf8 256))))
-  (let ((caller tx-sender))
-    (asserts! (is-none (map-get? realtors {principal: caller})) ERR_ALREADY_REGISTERED)
-    (asserts! (is-none (map-get? license-registry {license-number: license-number})) ERR_INVALID_LICENSE)
-   
-    ;; Store realtor profile
-    (map-set realtors
-      {principal: caller}
-      {
-        name: name,
-        license-number: license-number,
-        brokerage: brokerage,
-        status: "active",
-        registration-block: block-height,
-        profile-uri: profile-uri
-      }
-    )
-   
-    ;; Register license
-    (map-set license-registry
-      {license-number: license-number}
-      {principal: caller}
-    )
-   
-    (ok true)
-  )
-)
- 
-;; Update realtor profile
-(define-public (update-profile
-                (name (string-utf8 100))
-                (brokerage (string-utf8 100))
-                (profile-uri (optional (string-utf8 256))))
-  (let ((caller tx-sender)
-        (realtor-data (unwrap! (map-get? realtors {principal: caller}) ERR_NOT_REGISTERED)))
-   
-    ;; Update profile data
-    (map-set realtors
-      {principal: caller}
-      (merge realtor-data
-        {
-          name: name,
-          brokerage: brokerage,
-          profile-uri: profile-uri
-        }
-      )
-    )
-   
-    (ok true)
-  )
-)
- 
-;; Update realtor status (admin only)
-(define-public (update-status
-                (realtor principal)
-                (new-status (string-utf8 20)))
-  (let ((caller tx-sender)
-        (realtor-data (unwrap! (map-get? realtors {principal: realtor}) ERR_NOT_REGISTERED)))
-   
-    ;; Only contract owner can update status
-    (asserts! (is-eq caller contract-owner) ERR_UNAUTHORIZED)
-   
-    ;; Update status
-    (map-set realtors
-      {principal: realtor}
-      (merge realtor-data {status: new-status})
-    )
-   
-    (ok true)
-  )
-)
+;; Count of registered realtors
+(define-data-var realtor-count uint u0)
  
 ;; Read-only functions
  
-;; Get realtor profile
-(define-read-only (get-realtor (realtor principal))
-  (map-get? realtors {principal: realtor})
-)
- 
 ;; Check if a realtor is active
 (define-read-only (is-active-realtor (realtor principal))
-  (match (map-get? realtors {principal: realtor})
-    realtor-data (is-eq (get status realtor-data) "active")
+  (match (map-get? realtors {realtor: realtor})
+    realtor-data (is-eq (get status realtor-data) u"ACTIVE")
     false
   )
 )
  
-;; Get realtor by license number
-(define-read-only (get-realtor-by-license (license-number (string-utf8 50)))
-  (match (map-get? license-registry {license-number: license-number})
-    license-data (get-realtor (get principal license-data))
-    none
+;; Get realtor information
+(define-read-only (get-realtor-info (realtor principal))
+  (ok (unwrap! (map-get? realtors {realtor: realtor}) ERR_NOT_FOUND))
+)
+ 
+;; Register a new realtor
+(define-public (register-realtor (name (string-utf8 100))
+                              (license-number (string-utf8 50))
+                              (brokerage (string-utf8 100))
+                              (profile-uri (optional (string-utf8 256))))
+  (let ((caller tx-sender))
+    ;; Input validation
+    (asserts! (> (len name) u0) ERR_INVALID_INPUT)
+    (asserts! (> (len license-number) u0) ERR_INVALID_INPUT)
+    (asserts! (> (len brokerage) u0) ERR_INVALID_INPUT)
+    (asserts! (match profile-uri
+                some-uri (> (len some-uri) u0)
+                true)
+              ERR_INVALID_INPUT)
+              
+    ;; Check if already registered
+    (asserts! (is-none (map-get? realtors {realtor: caller})) ERR_ALREADY_REGISTERED)
+   
+    ;; Now we can safely use the validated inputs
+    (map-set realtors
+      {realtor: caller}
+      {
+        name: name,
+        license-number: license-number,
+        brokerage: brokerage,
+        status: u"ACTIVE",
+        profile-uri: profile-uri,
+        registration-block: block-height
+      }
+    )
+   
+    (var-set realtor-count (+ (var-get realtor-count) u1))
+    (ok true)
+  )
+)
+ 
+;; Update realtor status
+(define-public (update-status (realtor principal) (new-status (string-utf8 20)))
+  (begin
+    ;; Input validation for new-status
+    (asserts! (> (len new-status) u0) ERR_INVALID_INPUT)
+    (asserts! (or (is-eq new-status u"ACTIVE") 
+                 (is-eq new-status u"INACTIVE") 
+                 (is-eq new-status u"SUSPENDED"))
+              ERR_INVALID_INPUT)
+    
+    ;; Validate the realtor exists first - this is crucial for the warning
+    (match (map-get? realtors {realtor: realtor})
+      realtor-data (begin
+        ;; Only contract owner can change status
+        (asserts! (is-eq tx-sender contract-owner) ERR_UNAUTHORIZED)
+        
+        ;; Now we can safely use the validated realtor
+        (ok (map-set realtors
+              {realtor: realtor}
+              (merge realtor-data {status: new-status})
+            ))
+      )
+      ERR_NOT_FOUND  ;; Return not found error if realtor doesn't exist
+    )
   )
 )
